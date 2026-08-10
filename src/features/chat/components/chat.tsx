@@ -1,11 +1,17 @@
 "use client"
 
+import type { Meeting } from "@/features/meetings/model/types"
+
 import { useChatSocket } from "../hooks/use-chat-socket"
 import { ConnectionStatus } from "./connection-status"
 import { MessageForm } from "./message-form"
 import { MessageList } from "./message-list"
 
-export function Chat() {
+type ChatProps = {
+  meeting: Meeting | null
+}
+
+export function Chat({ meeting }: ChatProps) {
   const {
     connectionStatus,
     isConsultantTyping,
@@ -13,12 +19,14 @@ export function Chat() {
     reconnect,
     retryMessage,
     sendMessage,
-  } = useChatSocket()
+  } = useChatSocket(meeting?.id ?? null)
 
   return (
     <section className="chat-panel" aria-labelledby="chat-title">
       <header className="panel-header">
-        <h2 id="chat-title">Чат</h2>
+        <h2 id="chat-title">
+          {meeting ? `Чат: ${meeting.title}` : "Выберите встречу"}
+        </h2>
         <ConnectionStatus
           status={connectionStatus}
           isTyping={isConsultantTyping}
@@ -27,7 +35,11 @@ export function Chat() {
       </header>
 
       <MessageList messages={messages} onRetry={retryMessage} />
-      <MessageForm onSend={sendMessage} />
+      <MessageForm
+        key={meeting?.id}
+        onSend={sendMessage}
+        disabled={!meeting}
+      />
     </section>
   )
 }

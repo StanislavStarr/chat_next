@@ -158,6 +158,7 @@ button {
 }
 
 .retro-button:focus-visible,
+.meeting-button:focus-visible,
 .message-form textarea:focus-visible {
   outline: 1px solid var(--green);
   outline-offset: 2px;
@@ -194,11 +195,31 @@ button {
   border-left-color: var(--danger);
 }
 
-.meetings-list article {
-  padding: 0.7rem;
+.meetings-list li[data-selected="true"] {
+  border-color: var(--green);
+  border-left-color: var(--green);
+  box-shadow:
+    inset 0 0 1.2rem rgba(34, 255, 76, 0.08),
+    0 0 0.6rem rgba(114, 247, 126, 0.18);
 }
 
-.meetings-list h3 {
+.meeting-button {
+  display: block;
+  width: 100%;
+  padding: 0.7rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.meeting-button:hover {
+  background: rgba(114, 247, 126, 0.05);
+}
+
+.meeting-title {
+  display: block;
   margin: 0 0 0.45rem;
   color: var(--green);
   font-size: 0.83rem;
@@ -207,14 +228,14 @@ button {
 }
 
 .meetings-list time,
-.meetings-list p {
+.meeting-status {
   display: block;
   margin: 0.2rem 0 0;
   color: var(--green-muted);
   font-size: 0.72rem;
 }
 
-.meetings-list li[data-status="cancelled"] p {
+.meetings-list li[data-status="cancelled"] .meeting-status {
   color: var(--danger);
 }
 

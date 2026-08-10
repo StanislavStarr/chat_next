@@ -9,6 +9,7 @@ export type MessageAuthor = "user" | "consultant"
 
 export type ChatMessage = {
   id: string
+  meetingId: string
   clientId: string
   text: string
   author: MessageAuthor
@@ -16,7 +17,9 @@ export type ChatMessage = {
   createdAt: string
 }
 
-export type ChatSocketMessage = {
+export type ChatSocketSendEvent = {
+  type: "message"
+  meetingId: string
   clientId: string
   text: string
   createdAt: string
@@ -24,8 +27,31 @@ export type ChatSocketMessage = {
 
 export type ChatSocketTypingEvent = {
   type: "typing"
+  meetingId: string
   clientId: string
   isTyping: boolean
 }
 
-export type ChatSocketEvent = ChatSocketMessage | ChatSocketTypingEvent
+export type ChatSocketJoinEvent = {
+  type: "join"
+  meetingId: string
+}
+
+export type ChatSocketHistoryEvent = {
+  type: "history"
+  meetingId: string
+  messages: ChatMessage[]
+}
+
+export type ChatSocketMessageEvent = {
+  type: "message"
+  meetingId: string
+  message: ChatMessage
+}
+
+export type ChatSocketClientEvent = ChatSocketJoinEvent | ChatSocketSendEvent
+
+export type ChatSocketServerEvent =
+  | ChatSocketHistoryEvent
+  | ChatSocketMessageEvent
+  | ChatSocketTypingEvent

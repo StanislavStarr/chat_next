@@ -4,7 +4,12 @@ import { useQuery } from "@tanstack/react-query"
 
 import { fetchMeetings } from "../api/get-meetings"
 import { meetingsQueryKey } from "../model/queries"
-import type { MeetingStatus } from "../model/types"
+import type { Meeting, MeetingStatus } from "../model/types"
+
+type MeetingsListProps = {
+  selectedMeetingId: string | null
+  onSelectMeeting: (meeting: Meeting) => void
+}
 
 const statusLabels: Record<MeetingStatus, string> = {
   scheduled: "Запланирована",
@@ -18,7 +23,10 @@ const dateFormatter = new Intl.DateTimeFormat("ru-RU", {
   timeZone: "UTC",
 })
 
-export function MeetingsList() {
+export function MeetingsList({
+  selectedMeetingId,
+  onSelectMeeting,
+}: MeetingsListProps) {
   const {
     data: meetings = [],
     error,
@@ -57,14 +65,25 @@ export function MeetingsList() {
       ) : (
         <ul className="meetings-list">
           {meetings.map((meeting) => (
-            <li key={meeting.id} data-status={meeting.status}>
-              <article>
-                <h3>{meeting.title}</h3>
+            <li
+              key={meeting.id}
+              data-selected={meeting.id === selectedMeetingId}
+              data-status={meeting.status}
+            >
+              <button
+                className="meeting-button"
+                type="button"
+                aria-pressed={meeting.id === selectedMeetingId}
+                onClick={() => onSelectMeeting(meeting)}
+              >
+                <span className="meeting-title">{meeting.title}</span>
                 <time dateTime={meeting.date}>
                   {dateFormatter.format(new Date(meeting.date))}
                 </time>
-                <p>{statusLabels[meeting.status]}</p>
-              </article>
+                <span className="meeting-status">
+                  {statusLabels[meeting.status]}
+                </span>
+              </button>
             </li>
           ))}
         </ul>

@@ -4,9 +4,10 @@ import { useState, type FormEvent } from "react"
 
 type MessageFormProps = {
   onSend: (text: string) => void
+  disabled?: boolean
 }
 
-export function MessageForm({ onSend }: MessageFormProps) {
+export function MessageForm({ onSend, disabled = false }: MessageFormProps) {
   const [message, setMessage] = useState("")
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -26,6 +27,7 @@ export function MessageForm({ onSend }: MessageFormProps) {
       <textarea
         id="chat-message"
         name="message"
+        disabled={disabled}
         value={message}
         onChange={(event) => setMessage(event.target.value)}
         onKeyDown={(event) => {
@@ -39,7 +41,7 @@ export function MessageForm({ onSend }: MessageFormProps) {
       <button
         className="retro-button"
         type="submit"
-        disabled={!message.trim()}
+        disabled={disabled || !message.trim()}
       >
         Отправить
       </button>
