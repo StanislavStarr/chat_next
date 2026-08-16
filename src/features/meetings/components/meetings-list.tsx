@@ -1,7 +1,14 @@
 "use client"
 
 import { useQuery } from "@tanstack/react-query"
-
+import { cx } from "@/shared/lib/cx"
+import {
+  RetroButton,
+  RetroPanel,
+  RetroPanelHeader,
+  RetroPanelHeading,
+  retroScreenClassName,
+} from "@/shared/ui/retro"
 import { fetchMeetings } from "../api/get-meetings"
 import { meetingsQueryKey } from "../model/queries"
 import type { Meeting, MeetingStatus } from "../model/types"
@@ -39,21 +46,22 @@ export function MeetingsList({
   })
 
   return (
-    <section className="meetings-panel" aria-labelledby="meetings-title">
-      <header className="panel-header">
-        <h2 id="meetings-title">Встречи</h2>
-        <button
-          className="retro-button"
-          type="button"
-          onClick={() => refetch()}
-          disabled={isFetching}
-        >
+    <RetroPanel ariaLabelledBy="meetings-title" className="overflow-y-auto">
+      <RetroPanelHeader>
+        <RetroPanelHeading id="meetings-title">Встречи</RetroPanelHeading>
+        <RetroButton onClick={() => refetch()} disabled={isFetching}>
           {isFetching ? "Обновление..." : "Обновить"}
-        </button>
-      </header>
+        </RetroButton>
+      </RetroPanelHeader>
 
       {isError && (
-        <p className="error-message" role="alert">
+        <p
+          role="alert"
+          className={cx(
+            retroScreenClassName,
+            "m-3 border-[#6f3931] p-4 text-[0.8rem] text-danger [text-shadow:0_0_7px_rgba(255,112,95,0.35)]",
+          )}
+        >
           {error instanceof Error
             ? error.message
             : "Не удалось загрузить встречи"}
@@ -61,33 +69,68 @@ export function MeetingsList({
       )}
 
       {meetings.length === 0 ? (
-        <p className="empty-message">Встреч пока нет.</p>
+        <p
+          className={cx(
+            retroScreenClassName,
+            "m-3 border-[#334a36] p-4 text-[0.8rem] text-green-muted",
+          )}
+        >
+          Встреч пока нет.
+        </p>
       ) : (
-        <ul className="meetings-list">
-          {meetings.map((meeting) => (
-            <li
-              key={meeting.id}
-              data-selected={meeting.id === selectedMeetingId}
-              data-status={meeting.status}
-            >
-              <button
-                className="meeting-button"
-                type="button"
-                aria-pressed={meeting.id === selectedMeetingId}
-                onClick={() => onSelectMeeting(meeting)}
+        <ul className="p-2">
+          {meetings.map((meeting) => {
+            const isSelected = meeting.id === selectedMeetingId
+            const borderLeftClass = isSelected
+              ? "border-l-green"
+              : meeting.status === "cancelled"
+                ? "border-l-danger"
+                : meeting.status === "completed"
+                  ? "border-l-[#67715f]"
+                  : "border-l-green-muted"
+
+            return (
+              <li
+                key={meeting.id}
+                className={cx(
+                  "mb-[0.45rem] border border-l-[3px] bg-screen shadow-[inset_0_0_1rem_rgba(34,255,76,0.035)] last:mb-0",
+                  isSelected
+                    ? "border-green shadow-[inset_0_0_1.2rem_rgba(34,255,76,0.08),0_0_0.6rem_rgba(114,247,126,0.18)]"
+                    : "border-[#2f4933]",
+                  borderLeftClass,
+                )}
               >
-                <span className="meeting-title">{meeting.title}</span>
-                <time dateTime={meeting.date}>
-                  {dateFormatter.format(new Date(meeting.date))}
-                </time>
-                <span className="meeting-status">
-                  {statusLabels[meeting.status]}
-                </span>
-              </button>
-            </li>
-          ))}
+                <button
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => onSelectMeeting(meeting)}
+                  className="block w-full border-0 bg-transparent p-[0.7rem] text-left text-inherit hover:bg-[rgba(114,247,126,0.05)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-green focus-visible:outline-offset-2"
+                >
+                  <span className="mb-[0.45rem] block text-[0.83rem] font-medium leading-[1.35] text-green">
+                    {meeting.title}
+                  </span>
+                  <time
+                    dateTime={meeting.date}
+                    className="mt-[0.2rem] block text-[0.72rem] text-green-muted"
+                  >
+                    {dateFormatter.format(new Date(meeting.date))}
+                  </time>
+                  <span
+                    className={cx(
+                      "mt-[0.2rem] block text-[0.72rem]",
+                      meeting.status === "cancelled"
+                        ? "text-danger"
+                        : "text-green-muted",
+                    )}
+                  >
+                    {statusLabels[meeting.status]}
+                  </span>
+                </button>
+              </li>
+            )
+          })}
         </ul>
       )}
-    </section>
+    </RetroPanel>
   )
 }

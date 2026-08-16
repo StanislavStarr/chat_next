@@ -1,4 +1,4 @@
-import { getMeetings } from "@/shared/api/meetings"
+import { getMeetings } from "@/server/meetings"
 
 export async function GET() {
   const meetings = await getMeetings()

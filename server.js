@@ -1,6 +1,7 @@
 const { WebSocketServer } = require("ws")
 
 const wss = new WebSocketServer({ port: 8081 })
+const MAX_HISTORY_LENGTH = 200
 const histories = new Map()
 const pendingResponses = new Set()
 const subscriptions = new Map()
@@ -11,6 +12,15 @@ function getHistory(meetingId) {
   }
 
   return histories.get(meetingId)
+}
+
+function pushToHistory(meetingId, message) {
+  const history = getHistory(meetingId)
+  history.push(message)
+
+  if (history.length > MAX_HISTORY_LENGTH) {
+    history.splice(0, history.length - MAX_HISTORY_LENGTH)
+  }
 }
 
 function send(socket, event) {
@@ -57,7 +67,7 @@ function handleMessage(socket, payload) {
   }
 
   if (!history.some((message) => message.id === clientId)) {
-    history.push({
+    pushToHistory(meetingId, {
       id: clientId,
       meetingId,
       clientId,
@@ -95,7 +105,7 @@ function handleMessage(socket, payload) {
       createdAt: new Date().toISOString(),
     }
 
-    getHistory(meetingId).push(response)
+    pushToHistory(meetingId, response)
     pendingResponses.delete(responseKey)
 
     broadcast(meetingId, {
@@ -132,7 +142,7 @@ wss.on("connection", (socket) => {
       return
     }
 
-    if (payload.type === "message") {
+    if (payload.type === "send") {
       handleMessage(socket, payload)
     }
   })

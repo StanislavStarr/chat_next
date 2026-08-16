@@ -1,18 +1,18 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useReducer, useRef } from "react"
 
 import type {
   ChatMessage,
-  ChatSocketClientEvent,
   ChatSocketServerEvent,
   ConnectionStatus,
+  MessageStatus,
 } from "../model/types"
-
-const INITIAL_RECONNECT_DELAY = 1_000
-const MAX_RECONNECT_DELAY = 10_000
-
-type MessagesByMeeting = Record<string, ChatMessage[]>
+import {
+  chatMessagesReducer,
+  initialChatMessagesState,
+} from "./chat-messages-reducer"
+import { type SendFn, useWebSocketConnection } from "./use-websocket-connection"
 
 type UseChatSocketResult = {
   messages: ChatMessage[]
@@ -23,357 +23,105 @@ type UseChatSocketResult = {
   reconnect: () => void
 }
 
-function isChatMessage(value: unknown): value is ChatMessage {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "id" in value &&
-    typeof value.id === "string" &&
-    "meetingId" in value &&
-    typeof value.meetingId === "string" &&
-    "clientId" in value &&
-    typeof value.clientId === "string" &&
-    "text" in value &&
-    typeof value.text === "string" &&
-    "author" in value &&
-    (value.author === "user" || value.author === "consultant") &&
-    "status" in value &&
-    value.status === "delivered" &&
-    "createdAt" in value &&
-    typeof value.createdAt === "string"
-  )
-}
-
-function parseSocketEvent(data: unknown): ChatSocketServerEvent | null {
-  if (typeof data !== "string") {
-    return null
-  }
-
-  try {
-    const event: unknown = JSON.parse(data)
-
-    if (
-      typeof event !== "object" ||
-      event === null ||
-      !("type" in event) ||
-      !("meetingId" in event) ||
-      typeof event.meetingId !== "string"
-    ) {
-      return null
-    }
-
-    if (
-      event.type === "typing" &&
-      "clientId" in event &&
-      typeof event.clientId === "string" &&
-      "isTyping" in event &&
-      typeof event.isTyping === "boolean"
-    ) {
-      return event as ChatSocketServerEvent
-    }
-
-    if (
-      event.type === "history" &&
-      "messages" in event &&
-      Array.isArray(event.messages) &&
-      event.messages.every(isChatMessage)
-    ) {
-      return event as ChatSocketServerEvent
-    }
-
-    if (
-      event.type === "message" &&
-      "message" in event &&
-      isChatMessage(event.message)
-    ) {
-      return event as ChatSocketServerEvent
-    }
-  } catch {
-    return null
-  }
-
-  return null
-}
-
-function sendToSocket(socket: WebSocket, event: ChatSocketClientEvent): boolean {
-  if (socket.readyState !== WebSocket.OPEN) {
-    return false
-  }
-
-  try {
-    socket.send(JSON.stringify(event))
-    return true
-  } catch {
-    return false
-  }
-}
-
-function mergeHistory(
-  serverMessages: ChatMessage[],
-  localMessages: ChatMessage[],
-): ChatMessage[] {
-  const serverIds = new Set(serverMessages.map((message) => message.id))
-  const localOnlyMessages = localMessages.filter(
-    (message) => !serverIds.has(message.id),
-  )
-
-  return [...serverMessages, ...localOnlyMessages].sort(
-    (left, right) =>
-      new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
-  )
-}
-
 export function useChatSocket(
   meetingId: string | null,
   url = process.env.NEXT_PUBLIC_WS_URL,
 ): UseChatSocketResult {
-  const [messagesByMeeting, setMessagesByMeeting] =
-    useState<MessagesByMeeting>({})
-  const [typingKeys, setTypingKeys] = useState<Set<string>>(() => new Set())
-  const [connectionStatus, setConnectionStatus] =
-    useState<ConnectionStatus>("connecting")
-
-  const messagesRef = useRef<MessagesByMeeting>({})
-  const activeMeetingIdRef = useRef(meetingId)
-  const socketRef = useRef<WebSocket | null>(null)
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const reconnectAttemptRef = useRef(0)
-  const connectRef = useRef<() => void>(() => undefined)
-
-  activeMeetingIdRef.current = meetingId
-
-  const updateMeetingMessages = useCallback(
-    (
-      targetMeetingId: string,
-      updater: (current: ChatMessage[]) => ChatMessage[],
-    ) => {
-      setMessagesByMeeting((current) => {
-        const next = {
-          ...current,
-          [targetMeetingId]: updater(current[targetMeetingId] ?? []),
-        }
-        messagesRef.current = next
-        return next
-      })
-    },
-    [],
+  const [state, dispatch] = useReducer(
+    chatMessagesReducer,
+    initialChatMessagesState,
   )
 
-  useEffect(() => {
-    let active = true
-
-    const scheduleReconnect = () => {
-      if (!active || reconnectTimerRef.current) {
-        return
-      }
-
-      const delay = Math.min(
-        INITIAL_RECONNECT_DELAY * 2 ** reconnectAttemptRef.current,
-        MAX_RECONNECT_DELAY,
-      )
-
-      reconnectAttemptRef.current += 1
-      reconnectTimerRef.current = setTimeout(() => {
-        reconnectTimerRef.current = null
-        connectRef.current()
-      }, delay)
-    }
-
-    const connect = () => {
-      if (!active || !url) {
-        setConnectionStatus("disconnected")
-        return
-      }
-
-      setConnectionStatus("connecting")
-      setTypingKeys(new Set())
-
-      const socket = new WebSocket(url)
-      socketRef.current = socket
-
-      socket.addEventListener("open", () => {
-        if (!active || socketRef.current !== socket) {
-          return
-        }
-
-        reconnectAttemptRef.current = 0
-        setConnectionStatus("connected")
-
-        const activeMeetingId = activeMeetingIdRef.current
-
-        if (activeMeetingId) {
-          sendToSocket(socket, {
-            type: "join",
-            meetingId: activeMeetingId,
-          })
-        }
-
-        const sentIds = new Set<string>()
-        const failedIds = new Set<string>()
-
-        Object.values(messagesRef.current)
-          .flat()
-          .filter(
-            (message) =>
-              message.author === "user" && message.status === "pending",
-          )
-          .forEach((message) => {
-            const wasSent = sendToSocket(socket, {
-              type: "message",
-              meetingId: message.meetingId,
-              clientId: message.clientId,
-              text: message.text,
-              createdAt: message.createdAt,
-            })
-
-            if (wasSent) {
-              sentIds.add(message.id)
-            } else {
-              failedIds.add(message.id)
-            }
-          })
-
-        if (sentIds.size || failedIds.size) {
-          setMessagesByMeeting((current) => {
-            const next = Object.fromEntries(
-              Object.entries(current).map(([id, messages]) => [
-                id,
-                messages.map((message) => {
-                  if (sentIds.has(message.id)) {
-                    return { ...message, status: "sent" as const }
-                  }
-
-                  if (failedIds.has(message.id)) {
-                    return { ...message, status: "failed" as const }
-                  }
-
-                  return message
-                }),
-              ]),
-            )
-            messagesRef.current = next
-            return next
-          })
-        }
-      })
-
-      socket.addEventListener("message", (messageEvent) => {
-        if (!active || socketRef.current !== socket) {
-          return
-        }
-
-        const event = parseSocketEvent(messageEvent.data)
-
-        if (!event) {
-          return
-        }
-
-        if (event.type === "typing") {
-          const typingKey = `${event.meetingId}:${event.clientId}`
-
-          setTypingKeys((current) => {
-            const next = new Set(current)
-
-            if (event.isTyping) {
-              next.add(typingKey)
-            } else {
-              next.delete(typingKey)
-            }
-
-            return next
-          })
-          return
-        }
-
-        if (event.type === "history") {
-          updateMeetingMessages(event.meetingId, (current) =>
-            mergeHistory(event.messages, current),
-          )
-          return
-        }
-
-        setTypingKeys((current) => {
-          const next = new Set(current)
-          next.delete(`${event.meetingId}:${event.message.clientId}`)
-          return next
-        })
-
-        updateMeetingMessages(event.meetingId, (current) => {
-          const deliveredMessages = current.map((message) =>
-            message.author === "user" &&
-            message.clientId === event.message.clientId
-              ? { ...message, status: "delivered" as const }
-              : message,
-          )
-
-          if (
-            deliveredMessages.some(
-              (message) => message.id === event.message.id,
-            )
-          ) {
-            return deliveredMessages
-          }
-
-          return [...deliveredMessages, event.message]
-        })
-      })
-
-      socket.addEventListener("error", () => {
-        socket.close()
-      })
-
-      socket.addEventListener("close", () => {
-        if (!active || socketRef.current !== socket) {
-          return
-        }
-
-        socketRef.current = null
-        setConnectionStatus("disconnected")
-        setTypingKeys(new Set())
-        setMessagesByMeeting((current) => {
-          const next = Object.fromEntries(
-            Object.entries(current).map(([id, messages]) => [
-              id,
-              messages.map((message) =>
-                message.author === "user" && message.status === "sent"
-                  ? { ...message, status: "pending" as const }
-                  : message,
-              ),
-            ]),
-          )
-          messagesRef.current = next
-          return next
-        })
-        scheduleReconnect()
-      })
-    }
-
-    connectRef.current = connect
-    connect()
-
-    return () => {
-      active = false
-
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current)
-        reconnectTimerRef.current = null
-      }
-
-      socketRef.current?.close()
-      socketRef.current = null
-    }
-  }, [updateMeetingMessages, url])
+  const stateRef = useRef(state)
+  const activeMeetingIdRef = useRef(meetingId)
 
   useEffect(() => {
-    const socket = socketRef.current
+    stateRef.current = state
+  })
 
-    if (meetingId && socket?.readyState === WebSocket.OPEN) {
-      sendToSocket(socket, {
-        type: "join",
-        meetingId,
-      })
-    }
+  useEffect(() => {
+    activeMeetingIdRef.current = meetingId
   }, [meetingId])
+
+  const handleConnecting = useCallback(() => {
+    dispatch({ type: "connectionAttemptStarted" })
+  }, [])
+
+  const handleOpen = useCallback((send: SendFn) => {
+    const activeMeetingId = activeMeetingIdRef.current
+
+    if (activeMeetingId) {
+      send({ type: "join", meetingId: activeMeetingId })
+    }
+
+    const changes = new Map<string, MessageStatus>()
+
+    Object.values(stateRef.current.messagesByMeeting)
+      .flat()
+      .filter(
+        (message) => message.author === "user" && message.status === "pending",
+      )
+      .forEach((message) => {
+        const wasSent = send({
+          type: "send",
+          meetingId: message.meetingId,
+          clientId: message.clientId,
+          text: message.text,
+          createdAt: message.createdAt,
+        })
+
+        changes.set(message.id, wasSent ? "sent" : "failed")
+      })
+
+    if (changes.size) {
+      dispatch({ type: "messagesStatusChanged", changes })
+    }
+  }, [])
+
+  const handleEvent = useCallback((event: ChatSocketServerEvent) => {
+    if (event.type === "typing") {
+      dispatch({
+        type: "typingChanged",
+        meetingId: event.meetingId,
+        clientId: event.clientId,
+        isTyping: event.isTyping,
+      })
+      return
+    }
+
+    if (event.type === "history") {
+      dispatch({
+        type: "historyMerged",
+        meetingId: event.meetingId,
+        messages: event.messages,
+      })
+      return
+    }
+
+    dispatch({
+      type: "messageDelivered",
+      meetingId: event.meetingId,
+      message: event.message,
+    })
+  }, [])
+
+  const handleClose = useCallback(() => {
+    dispatch({ type: "connectionLost" })
+  }, [])
+
+  const { connectionStatus, send, reconnect } = useWebSocketConnection({
+    url,
+    onConnecting: handleConnecting,
+    onOpen: handleOpen,
+    onEvent: handleEvent,
+    onClose: handleClose,
+  })
+
+  useEffect(() => {
+    if (meetingId) {
+      send({ type: "join", meetingId })
+    }
+  }, [meetingId, send])
 
   const sendMessage = useCallback(
     (text: string) => {
@@ -386,20 +134,17 @@ export function useChatSocket(
 
       const clientId = crypto.randomUUID()
       const createdAt = new Date().toISOString()
-      const socket = socketRef.current
-      const wasSent =
-        socket !== null &&
-        sendToSocket(socket, {
-          type: "message",
-          meetingId: targetMeetingId,
-          clientId,
-          text: normalizedText,
-          createdAt,
-        })
+      const wasSent = send({
+        type: "send",
+        meetingId: targetMeetingId,
+        clientId,
+        text: normalizedText,
+        createdAt,
+      })
 
-      updateMeetingMessages(targetMeetingId, (current) => [
-        ...current,
-        {
+      dispatch({
+        type: "messageQueued",
+        message: {
           id: clientId,
           meetingId: targetMeetingId,
           clientId,
@@ -408,9 +153,9 @@ export function useChatSocket(
           status: wasSent ? "sent" : "pending",
           createdAt,
         },
-      ])
+      })
     },
-    [updateMeetingMessages],
+    [send],
   )
 
   const retryMessage = useCallback(
@@ -421,7 +166,7 @@ export function useChatSocket(
         return
       }
 
-      const message = messagesRef.current[targetMeetingId]?.find(
+      const message = stateRef.current.messagesByMeeting[targetMeetingId]?.find(
         (item) => item.author === "user" && item.clientId === clientId,
       )
 
@@ -429,42 +174,23 @@ export function useChatSocket(
         return
       }
 
-      const socket = socketRef.current
-      const wasSent =
-        socket !== null &&
-        sendToSocket(socket, {
-          type: "message",
-          meetingId: message.meetingId,
-          clientId: message.clientId,
-          text: message.text,
-          createdAt: message.createdAt,
-        })
+      const wasSent = send({
+        type: "send",
+        meetingId: message.meetingId,
+        clientId: message.clientId,
+        text: message.text,
+        createdAt: message.createdAt,
+      })
 
-      updateMeetingMessages(targetMeetingId, (current) =>
-        current.map((item) =>
-          item.author === "user" && item.clientId === clientId
-            ? { ...item, status: wasSent ? "sent" : "failed" }
-            : item,
-        ),
-      )
+      dispatch({
+        type: "messagesStatusChanged",
+        changes: new Map([[message.id, wasSent ? "sent" : "failed"]]),
+      })
     },
-    [updateMeetingMessages],
+    [send],
   )
 
-  const reconnect = useCallback(() => {
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current)
-      reconnectTimerRef.current = null
-    }
-
-    const socket = socketRef.current
-    socketRef.current = null
-    socket?.close()
-    reconnectAttemptRef.current = 0
-    connectRef.current()
-  }, [])
-
-  const messages = meetingId ? (messagesByMeeting[meetingId] ?? []) : []
+  const messages = meetingId ? (state.messagesByMeeting[meetingId] ?? []) : []
   const typingPrefix = `${meetingId}:`
 
   return {
@@ -472,7 +198,7 @@ export function useChatSocket(
     connectionStatus,
     isConsultantTyping:
       meetingId !== null &&
-      [...typingKeys].some((key) => key.startsWith(typingPrefix)),
+      [...state.typingKeys].some((key) => key.startsWith(typingPrefix)),
     sendMessage,
     retryMessage,
     reconnect,

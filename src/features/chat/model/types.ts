@@ -18,7 +18,7 @@ export type ChatMessage = {
 }
 
 export type ChatSocketSendEvent = {
-  type: "message"
+  type: "send"
   meetingId: string
   clientId: string
   text: string
